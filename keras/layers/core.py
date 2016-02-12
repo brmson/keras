@@ -137,7 +137,15 @@ class Layer(object):
         # if layer is not connected (e.g. input layer),
         # input shape can be set manually via _input_shape attribute.
         if hasattr(self, 'previous'):
-            return self.previous.output_shape
+            if hasattr(self, 'shape_cache') and self.cache_enabled:
+                previous_layer_id = id(self.previous)
+                if previous_layer_id in self.shape_cache:
+                    return self.shape_cache[previous_layer_id]
+            previous_size = self.previous.output_shape
+            if hasattr(self, 'shape_cache') and self.cache_enabled:
+                previous_layer_id = id(self.previous)
+                self.shape_cache[previous_layer_id] = previous_size
+            return previous_size
         elif hasattr(self, '_input_shape'):
             return self._input_shape
         else:
@@ -230,7 +238,7 @@ class Layer(object):
                                              str(len(weights)) + ' provided weights)')
         for p, w in zip(params, weights):
             if K.get_value(p).shape != w.shape:
-                raise Exception('Layer shape %s not compatible with weight shape %s.' % (K.get_value(p).shape, w.shape))
+                raise Exception('Layer weight shape %s not compatible with provided weight shape %s.' % (K.get_value(p).shape, w.shape))
             K.set_value(p, w)
 
     def get_weights(self):
