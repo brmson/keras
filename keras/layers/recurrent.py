@@ -153,7 +153,10 @@ class Recurrent(MaskedLayer):
                 self.updates.append((self.states[i], states[i]))
 
         if self.return_sequences:
-            return outputs
+            if self.go_backwards:
+                return outputs[:, ::-1]
+            else:
+                return outputs
         else:
             return last_output
 
