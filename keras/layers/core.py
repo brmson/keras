@@ -45,19 +45,26 @@ class Layer(object):
                           'name'}
         for kwarg in kwargs:
             assert kwarg in allowed_kwargs, 'Keyword argument not understood: ' + kwarg
+
+        if 'name' in kwargs:
+            self.name = kwargs['name']
+        else:
+            self.name = self.__class__.__name__.lower()
+
+        if 'cache_enabled' in kwargs:
+            self.cache_enabled = kwargs['cache_enabled']
+        else:
+            self.cache_enabled = True
+
         if 'batch_input_shape' in kwargs:
             self.set_input_shape(tuple(kwargs['batch_input_shape']))
         elif 'input_shape' in kwargs:
             self.set_input_shape((None,) + tuple(kwargs['input_shape']))
-        self.trainable = True
+
         if 'trainable' in kwargs:
             self.trainable = kwargs['trainable']
-        self.name = self.__class__.__name__.lower()
-        if 'name' in kwargs:
-            self.name = kwargs['name']
-        self.cache_enabled = True
-        if 'cache_enabled' in kwargs:
-            self.cache_enabled = kwargs['cache_enabled']
+        else:
+            self.trainable = True
 
     @property
     def name(self):
@@ -241,8 +248,8 @@ class Layer(object):
         elif hasattr(self, 'input'):
             return self.input
         else:
-            raise Exception('Layer is not connected' +
-                            ' and is not an input layer.')
+            self.input = K.placeholder(shape=self.input_shape)
+            return self.input
 
     def supports_masked_input(self):
         '''Whether or not this layer respects the output mask of its previous
@@ -388,8 +395,6 @@ class Masking(MaskedLayer):
     def __init__(self, mask_value=0., **kwargs):
         super(Masking, self).__init__(**kwargs)
         self.mask_value = mask_value
-        if (not hasattr(self, 'input')):
-            self.input = K.placeholder(ndim=3)
 
     def get_output_mask(self, train=False):
         X = self.get_input(train)
@@ -516,6 +521,10 @@ class Merge(Layer):
                     self.trainable_weights.append(p)
                     self.constraints.append(c)
         super(Merge, self).__init__()
+
+    @property
+    def input_shape(self):
+        return [layer.input_shape for layer in self.layers]
 
     @property
     def output_shape(self):
@@ -996,14 +1005,15 @@ class Dense(Layer):
         self.input_dim = input_dim
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
-        self.input = K.placeholder(ndim=2)
         super(Dense, self).__init__(**kwargs)
 
     def build(self):
         input_dim = self.input_shape[1]
 
-        self.W = self.init((input_dim, self.output_dim))
-        self.b = K.zeros((self.output_dim,))
+        self.W = self.init((input_dim, self.output_dim),
+                           name='{}_W'.format(self.name))
+        self.b = K.zeros((self.output_dim,),
+                         name='{}_b'.format(self.name))
 
         self.trainable_weights = [self.W, self.b]
 
@@ -1111,14 +1121,15 @@ class TimeDistributedDense(MaskedLayer):
         self.input_length = input_length
         if self.input_dim:
             kwargs['input_shape'] = (self.input_length, self.input_dim)
-        self.input = K.placeholder(ndim=3)
         super(TimeDistributedDense, self).__init__(**kwargs)
 
     def build(self):
         input_dim = self.input_shape[2]
 
-        self.W = self.init((input_dim, self.output_dim))
-        self.b = K.zeros((self.output_dim,))
+        self.W = self.init((input_dim, self.output_dim),
+                           name='{}_W'.format(self.name))
+        self.b = K.zeros((self.output_dim,),
+                         name='{}_b'.format(self.name))
 
         self.trainable_weights = [self.W, self.b]
         self.regularizers = []
@@ -1417,14 +1428,15 @@ class MaxoutDense(Layer):
         self.input_dim = input_dim
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
-        self.input = K.placeholder(ndim=2)
         super(MaxoutDense, self).__init__(**kwargs)
 
     def build(self):
         input_dim = self.input_shape[1]
 
-        self.W = self.init((self.nb_feature, input_dim, self.output_dim))
-        self.b = K.zeros((self.nb_feature, self.output_dim))
+        self.W = self.init((self.nb_feature, input_dim, self.output_dim),
+                           name='{}_W'.format(self.name))
+        self.b = K.zeros((self.nb_feature, self.output_dim),
+                         name='{}_b'.format(self.name))
 
         self.trainable_weights = [self.W, self.b]
         self.regularizers = []
@@ -1511,6 +1523,12 @@ class Lambda(Layer):
     @property
     def output_shape(self):
         if self._output_shape is None:
+            # if TensorFlow, we can infer the output shape directly:
+            if K._BACKEND == 'tensorflow':
+                # we assume output shape is not dependent on train/test mode
+                x = self.get_input()
+                return K.int_shape(x)
+            # otherwise, we default to the input shape
             return self.input_shape
         elif type(self._output_shape) == tuple:
             nb_samples = self.input_shape[0] if self.input_shape else None
@@ -1985,18 +2003,20 @@ class Highway(Layer):
         self.input_dim = input_dim
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
-        self.input = K.placeholder(ndim=2)
         super(Highway, self).__init__(**kwargs)
 
     def build(self):
         input_dim = self.input_shape[1]
 
-        self.W = self.init((input_dim, input_dim))
-        self.W_carry = self.init((input_dim, input_dim))
+        self.W = self.init((input_dim, input_dim),
+                           name='{}_W'.format(self.name))
+        self.W_carry = self.init((input_dim, input_dim),
+                                 name='{}_W_carry'.format(self.name))
 
-        self.b = K.zeros((input_dim,))
+        self.b = K.zeros((input_dim,), name='{}_b'.format(self.name))
         # initialize with a vector of values `transform_bias`
-        self.b_carry = K.variable(np.ones((input_dim,)) * self.transform_bias)
+        self.b_carry = K.variable(np.ones((input_dim,)) * self.transform_bias,
+                                  name='{}_b_carry'.format(self.name))
 
         self.trainable_weights = [self.W, self.b, self.W_carry, self.b_carry]
 
