@@ -20,13 +20,17 @@ def time_distributed_dense(x, w, b=None, dropout=None,
     if not output_dim:
         # won't work with TensorFlow
         output_dim = K.shape(w)[1]
+
     if dropout:
+        # apply the same dropout pattern at every timestep
         ones = K.ones_like(K.reshape(x[:, 0, :], (-1, input_dim)))
         dropout_matrix = K.dropout(ones, dropout)
+        expanded_dropout_matrix = K.repeat(dropout_matrix, timesteps)
+        x *= expanded_dropout_matrix
+
     # collapse time dimension and batch dimension together
     x = K.reshape(x, (-1, input_dim))
-    if dropout:
-        x *= K.concatenate([dropout_matrix] * timesteps, 0)
+
     x = K.dot(x, w)
     if b:
         x = x + b
@@ -149,9 +153,10 @@ class Recurrent(MaskedLayer):
 
     def get_initial_states(self, x):
         # build an all-zero tensor of shape (samples, output_dim)
-        initial_state = x[:, 0, 0] * 0  # (samples, )
-        initial_state = K.pack([initial_state] * self.output_dim)  # (output_dim, samples)
-        initial_state = K.permute_dimensions(initial_state, (1, 0))  # (samples, output_dim)
+        initial_state = K.zeros_like(x)  # (samples, timesteps, input_dim)
+        initial_state = K.sum(initial_state, axis=1)  # (samples, input_dim)
+        reducer = K.zeros((self.input_dim, self.output_dim))
+        initial_state = K.dot(initial_state, reducer)  # (samples, output_dim)
         initial_states = [initial_state for _ in range(len(self.states))]
         return initial_states
 
