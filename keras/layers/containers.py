@@ -394,12 +394,9 @@ class Graph(Layer):
         if dtype == 'float':
             layer.input = K.placeholder(shape=layer.input_shape, name=name)
         else:
-            if (input_shape and len(input_shape) == 1) or (batch_input_shape and len(batch_input_shape) == 2):
-                layer.input = K.placeholder(shape=layer.input_shape,
-                                            dtype='int32',
-                                            name=name)
-            else:
-                raise Exception('Type "int" can only be used with ndim==2 (Embedding).')
+            layer.input = K.placeholder(shape=layer.input_shape,
+                                        dtype='int32',
+                                        name=name)
         self.inputs[name] = layer
         config = {'name': name, 'dtype': dtype}
         if batch_input_shape:
